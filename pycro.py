@@ -6,6 +6,14 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 from pprint import pformat
+import win32gui
+import win32com.client
+import win32con
+import cv2
+from matplotlib import pyplot as plt
+import pyautogui
+import numpy as np
+import time
 
 #
 #--ALL VARIABLES--#
@@ -17,6 +25,7 @@ unit_pressed = False
 current_unit = None
 placed_units = []
 shared_unit_data = {}
+setup_complete = False
 
 #
 #--SETUP FUNCTIONS--#
@@ -140,7 +149,7 @@ def create_preview_window():
     title_label.pack(pady=20)
     
     # Create canvas for preview
-    preview_canvas = tk.Canvas(preview_window, width=resized_image.width, height=resized_image.height)
+    preview_canvas = tk.Canvas(preview_window, width=960, height=540)
     preview_canvas.pack()
     preview_canvas.create_image(0, 0, anchor=tk.NW, image=map_image)
     
@@ -153,6 +162,10 @@ def create_preview_window():
                              text="If this is not right, you can go back and make changes.", 
                              font=("Arial", 10, "italic"))
     message_label.pack(pady=10)
+    
+    # Add Close button
+    close_button = ttk.Button(preview_window, text="Close Preview", command=preview_window.destroy)
+    close_button.pack(pady=10)
     
     # Copy all placed units to preview canvas
     preview_units = []
@@ -207,7 +220,7 @@ def create_preview_window():
             # After reaching wave 15, restart from wave 1
             preview_window.after(1000, update_preview, 1)
     
-    # Start the animation
+    # Start the display
     preview_window.after(1000, update_preview, 1)
 
 
@@ -222,7 +235,7 @@ def update_unit_display(unit):
                             text=str(unit['unit_num']))
 
 def print_lists():
-    global shared_unit_data  # Declare the use of the global variable
+    global shared_unit_data
     confirmation = messagebox.askyesno("Confirm", "Are you sure you want to complete the setup?")
     if confirmation:
         # Save the unit data to the shared variable with the new format
@@ -237,10 +250,15 @@ def print_lists():
                 } for unit in placed_units
             ]
         }
+        setup_complete = True
         
+        # Add the continue button
+        continue_button = ttk.Button(right_frame, text="Continue to macro", command=root.destroy)
+        continue_button.pack(pady=10)
+
         # Log the shared unit data
         log("Saved Unit Data:")
-        log(str(shared_unit_data))  # Log the entire shared_unit_data variable
+        log(str(shared_unit_data)) 
         
         messagebox.showinfo("Setup Complete", "The setup has been completed and data has been logged.")
         create_preview_window()
@@ -255,22 +273,19 @@ root = tk.Tk()
 root.title("Setup")
 
 original_image = Image.open("map.png")
-resized_image = original_image.resize((original_image.width // 3, original_image.height // 3))
+resized_image = original_image.resize((960, 540), Image.LANCZOS)
 map_image = ImageTk.PhotoImage(resized_image)
 
-# Create main frame to contain left and right frames
 main_frame = ttk.Frame(root)
 main_frame.pack(side="top", fill="both", expand=True)
 
-# Create and pack left frame inside main frame
 left_frame = ttk.Frame(main_frame)
 left_frame.pack(side="left", fill="y", padx=10, pady=10)
 
-# Create and pack right frame inside main frame
 right_frame = ttk.Frame(main_frame)
 right_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
 
-map_canvas = tk.Canvas(left_frame, width=resized_image.width, height=resized_image.height)
+map_canvas = tk.Canvas(left_frame, width=960, height=540)
 map_canvas.pack()
 map_canvas.create_image(0, 0, anchor=tk.NW, image=map_image)
 map_canvas.bind("<Button-1>", on_map_click)
@@ -295,7 +310,7 @@ button_frame.pack(pady=10, fill='both')
 complete_button = ttk.Button(right_frame, text="Finish setup", command=print_lists)
 complete_button.pack(pady=10)
 
-for i in range(6):
+for i in range(5):
     button_frame.columnconfigure(i, weight=1)
 
 u1_button = ttk.Button(button_frame, text="1", width=3, command=lambda: unit_button_click(1))
@@ -308,14 +323,10 @@ u4_button = ttk.Button(button_frame, text="4", width=3, command=lambda: unit_but
 u4_button.grid(row=0, column=3, padx=2, sticky='ew')
 u5_button = ttk.Button(button_frame, text="5", width=3, command=lambda: unit_button_click(5))
 u5_button.grid(row=0, column=4, padx=2, sticky='ew')
-u6_button = ttk.Button(button_frame, text="6", width=3, command=lambda: unit_button_click(6))
-u6_button.grid(row=0, column=5, padx=2, sticky='ew')
 
-# Create bottom frame and pack it below the main frame
 bottom_frame = ttk.Frame(root)
 bottom_frame.pack(side="bottom", fill="x", padx=10, pady=10)
 
-# Add labels to the bottom frame
 keybind_label = ttk.Label(bottom_frame, text="Keybinds:", font=("Arial", 12, "bold"))
 keybind_label.pack(side="left", padx=(0, 10))
 
@@ -350,18 +361,198 @@ root.mainloop()
 #                     #
 #                     #
 
+# Split shared_unit_data into separate lists
+waves = []
+unit_nums = []
+positions_x = []
+positions_y = []
+upgrade_lists = []
+playbutton = cv2.imread("Lobbydetections\\playbutton.png")
+playbutton_gray = cv2.cvtColor(playbutton, cv2.COLOR_BGR2GRAY)
+playbutton_rgb = cv2.cvtColor(playbutton, cv2.COLOR_BGR2RGB)
+
+# Extract data from shared_unit_data
+for unit in shared_unit_data.get('units', []):
+    waves.append(unit['wave'])
+    unit_nums.append(unit['unit_num'])
+    positions_x.append(unit['posx'])
+    positions_y.append(unit['posy'])
+    upgrade_lists.append(unit['upgrades'])
+
+#
+#
+#
+#
+# TEMPORARY, DELETE LATER.
 def update_shared_data_label():
-    formatted_data = pformat(shared_unit_data, width=40)
-    shared_data_label.config(text=f"Shared Unit Data:\n{formatted_data}")
+    formatted_data = "Split Unit Data:\n"
+    formatted_data += f"Waves: {waves}\n"
+    formatted_data += f"Unit Numbers: {unit_nums}\n"
+    formatted_data += f"X Positions: {positions_x}\n"
+    formatted_data += f"Y Positions: {positions_y}\n"
+    formatted_data += f"Upgrade Lists: {upgrade_lists}\n"
+    shared_data_label.config(text=formatted_data)
+#
+#
+#
+#
+
+def find_roblox_window():
+    browser_names = [
+        "microsoft edge", 
+        "chrome", 
+        "firefox", 
+        "safari", 
+        "opera", 
+        "brave", 
+        "vivaldi", 
+        "browser"
+    ]
+
+    def enum_windows_callback(hwnd, windows):
+        # Check if the window is visible and has a title
+        if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd):
+            # Get the window title and class name
+            title = win32gui.GetWindowText(hwnd)
+            class_name = win32gui.GetClassName(hwnd)
+            
+            # Check if the title contains any browser names
+            is_browser = any(browser_name in title.lower() for browser_name in browser_names)
+            
+            # Print out window details for debugging, remove later
+            print(f"Window Title: {title}, Class Name: {class_name}")
+            
+            # Check for Roblox-like window titles or class names, excluding browsers
+            if not is_browser and ("roblox" in title.lower() or "roblox" in class_name.lower()):
+                windows.append(hwnd)
+        return True
+
+    # List to store found Roblox windows
+    roblox_windows = []
+    
+    # Run through all windows
+    win32gui.EnumWindows(enum_windows_callback, roblox_windows)
+    
+    # If windows found, return the first one, remove later.
+    if roblox_windows:
+        print(f"Found Roblox window: {win32gui.GetWindowText(roblox_windows[0])}")
+        return roblox_windows[0]
+    
+    return None
+
+def find_and_click_play_button():
+    # Find the Roblox window using our custom function
+    hwnd = find_roblox_window()
+    
+    if hwnd:
+        try:
+            # Bring the window to the foreground
+            shell = win32com.client.Dispatch("WScript.Shell")
+            shell.SendKeys('%')  # Alt key to bring window to foreground
+            win32gui.SetForegroundWindow(hwnd)
+            
+            # Restore the window if minimized
+            if win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            
+            # Give a small delay incase focus takes longer
+            time.sleep(1)
+        except Exception as e:
+            print(f"Could not bring Roblox window to foreground: {e}")
+        
+        # Screenshot the screen
+        screenshot = pyautogui.screenshot()
+        screenshot_np = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+        screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_BGR2GRAY)
+        
+        # Template matching
+        result = cv2.matchTemplate(screenshot_gray, playbutton_gray, cv2.TM_CCOEFF_NORMED)
+        
+        # Find the location of the best match
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+        
+        # Set the threshold for matching
+        threshold = 0.8
+        if max_val >= threshold:
+            # Get the center of the matched region
+            w, h = playbutton_gray.shape[::-1]
+            top_left = max_loc
+            center_x = top_left[0] + w // 2
+            center_y = top_left[1] + h // 2
+            
+            # Click the center of the play button
+            pyautogui.click(center_x, center_y)
+            print("Play button found and clicked!")
+            return True
+        else:
+            print("Play button not found.")
+            return False
+    else:
+        print("Roblox window not found")
+        return False
+
+def embed_roblox():
+    # Find the Roblox window
+    hwnd = find_roblox_window()
+
+    if hwnd:
+        # Set fixed dimensions for the Roblox window
+        fixed_width = 960
+        fixed_height = 540
+        
+        # Get the window handle of the frame where roblox is going to be embedded
+        frame_hwnd = roblox_frame.winfo_id()
+        
+        # Set the parent of the Roblox window to our frame
+        win32gui.SetParent(hwnd, frame_hwnd)
+        
+        # Move and resize the Roblox window to fill the frame with fixed dimensions
+        win32gui.MoveWindow(hwnd, 0, 0, fixed_width, fixed_height, True)
+        
+        # Remove the window style that allows resizing and moving
+        style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+        style = style & ~win32con.WS_THICKFRAME & ~win32con.WS_CAPTION
+        win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, style)
+        
+        # Force window to redraw
+        win32gui.SetWindowPos(hwnd, None, 0, 0, fixed_width, fixed_height, 
+                              win32con.SWP_FRAMECHANGED | win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+        
+        # Wait a moment for the window to settle
+        time.sleep(1)
+        
+        # Print the actual window title after embedding, remove later.
+        actual_title = win32gui.GetWindowText(hwnd)
+        print(f"Embedded Roblox window with actual title: {actual_title}")
+        
+        # Start searching for play button
+        find_and_click_play_button()
+    else:
+        print("Roblox window not found. Please ensure Roblox is open.")
 
 mainroot = tk.Tk()
 mainroot.title("Main")
+mainroot.geometry("1280x720")
+mainroot.resizable(True, True) 
 
-# Create a label to display shared_unit_data
-shared_data_label = ttk.Label(mainroot, text="", font=("Courier", 10), justify=tk.LEFT)
+main_frame = ttk.Frame(mainroot)
+main_frame.pack(fill=tk.BOTH, expand=True)
+
+roblox_frame = ttk.Frame(main_frame, relief="solid", borderwidth=1, width=960, height=540)
+roblox_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False)  # Set expand to False to keep the f
+
+right_frame = ttk.Frame(main_frame)
+right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True) 
+
+embed_button = ttk.Button(main_frame, text="Embed Roblox", command=embed_roblox)
+embed_button.pack()
+
+data_frame = ttk.Frame(main_frame)
+data_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+shared_data_label = ttk.Label(data_frame, text="", font=("Courier", 10), justify=tk.LEFT)
 shared_data_label.pack(padx=10, pady=10)
 
-# Update the label with the current shared_unit_data
 update_shared_data_label()
 
 mainroot.mainloop()
